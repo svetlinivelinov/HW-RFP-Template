@@ -7,6 +7,9 @@
     "dev": "pnpm --filter @app/web dev & pnpm --filter @app/api dev",
     "build": "pnpm -r build",
     "start": "cd apps/api && cross-env NODE_ENV=production node dist/index.js",
+    "start:prod": "powershell -ExecutionPolicy Bypass -File ./start-production.ps1",
+    "start:dev": "powershell -ExecutionPolicy Bypass -File ./start-dev.ps1",
+    "stop": "powershell -ExecutionPolicy Bypass -File ./stop-server.ps1",
     "test": "pnpm -r test",
     "clean": "pnpm -r clean"
   },
