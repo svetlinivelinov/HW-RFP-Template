@@ -1,0 +1,163 @@
+import { FastifyInstance } from 'fastify';
+import { z } from 'zod';
+import { nanoid } from 'nanoid';
+import { draftRepository } from '../db.js';
+import { parseTemplate } from '@packages/template-engine';
+import { readFileSync } from 'fs';
+import { resolve, dirname } from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+// Path to the built-in template
+const TEMPLATE_PATH = resolve(__dirname, '../../../../assets/template/master_template_v2_1_skeleton.docx');
+
+// Validation schemas
+const CreateDraftSchema = z.object({
+  name: z.string().min(1).max(255),
+});
+
+const UpdateDraftSchema = z.object({
+  blocks: z.record(z.boolean()).optional(),
+  values: z.record(z.string()).optional(),
+  tables: z.record(z.array(z.record(z.string()))).optional(),
+});
+
+const UpdateDraftNameSchema = z.object({
+  name: z.string().min(1).max(255),
+});
+
+export async function draftRoutes(fastify: FastifyInstance) {
+  /**
+   * POST /api/drafts
+   * Create a new draft
+   */
+  fastify.post('/', async (request, reply) => {
+    const body = CreateDraftSchema.parse(request.body);
+    
+    const id = nanoid();
+    
+    // Load template and parse manifest to get default blocks
+    let defaultBlocks: Record<string, boolean> = {};
+    
+    try {
+      const templateBuffer = readFileSync(TEMPLATE_PATH);
+      const manifest = await parseTemplate(templateBuffer);
+      
+      // Default all blocks to true
+      manifest.blocks.forEach(blockName => {
+        defaultBlocks[blockName] = true;
+      });
+    } catch (err) {
+      fastify.log.error({ err }, 'Failed to load template');
+      // Continue with empty defaults if template not found
+    }
+    
+    const draftData = {
+      blocks: defaultBlocks,
+      values: {},
+      tables: {},
+    };
+    
+    draftRepository.create(id, body.name, JSON.stringify(draftData));
+    
+    return { id };
+  });
+
+  /**
+   * GET /api/drafts
+   * List all drafts
+   */
+  fastify.get('/', async (request, reply) => {
+    const drafts = draftRepository.findAll();
+    return drafts;
+  });
+
+  /**
+   * GET /api/drafts/:id
+   * Get a specific draft
+   */
+  fastify.get('/:id', async (request, reply) => {
+    const { id } = request.params as { id: string };
+    
+    const draft = draftRepository.findById(id);
+    
+    if (!draft) {
+      return reply.status(404).send({ error: 'Draft not found' });
+    }
+    
+    return {
+      id: draft.id,
+      name: draft.name,
+      data: JSON.parse(draft.draft_json),
+      createdAt: draft.created_at,
+      updatedAt: draft.updated_at,
+    };
+  });
+
+  /**
+   * PATCH /api/drafts/:id
+   * Update draft data (blocks/values/tables)
+   */
+  fastify.patch('/:id', async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const updates = UpdateDraftSchema.parse(request.body);
+    
+    const draft = draftRepository.findById(id);
+    
+    if (!draft) {
+      return reply.status(404).send({ error: 'Draft not found' });
+    }
+    
+    const currentData = JSON.parse(draft.draft_json);
+    
+    // Merge updates
+    const updatedData = {
+      blocks: updates.blocks !== undefined ? { ...currentData.blocks, ...updates.blocks } : currentData.blocks,
+      values: updates.values !== undefined ? { ...currentData.values, ...updates.values } : currentData.values,
+      tables: updates.tables !== undefined ? { ...currentData.tables, ...updates.tables } : currentData.tables,
+    };
+    
+    draftRepository.update(id, JSON.stringify(updatedData));
+    
+    return { success: true };
+  });
+
+  /**
+   * PATCH /api/drafts/:id/name
+   * Update draft name
+   */
+  fastify.patch('/:id/name', async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const body = UpdateDraftNameSchema.parse(request.body);
+    
+    const draft = draftRepository.findById(id);
+    
+    if (!draft) {
+      return reply.status(404).send({ error: 'Draft not found' });
+    }
+    
+    draftRepository.updateName(id, body.name);
+    
+    return { success: true };
+  });
+
+  /**
+   * DELETE /api/drafts/:id
+   * Delete a draft
+   */
+  fastify.delete('/:id', async (request, reply) => {
+    const { id } = request.params as { id: string };
+    
+    const draft = draftRepository.findById(id);
+    
+    if (!draft) {
+      return reply.status(404).send({ error: 'Draft not found' });
+    }
+    
+    draftRepository.delete(id);
+    
+    return { success: true };
+  });
+}

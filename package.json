@@ -1,0 +1,24 @@
+{
+  "name": "docx-template-app",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Minimal web app for Word template processing",
+  "scripts": {
+    "dev": "pnpm --filter @app/web dev & pnpm --filter @app/api dev",
+    "build": "pnpm -r build",
+    "start": "cd apps/api && cross-env NODE_ENV=production node dist/index.js",
+    "test": "pnpm -r test",
+    "clean": "pnpm -r clean"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "pnpm": ">=8.0.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["better-sqlite3", "esbuild"]
+  },
+  "devDependencies": {
+    "cross-env": "^7.0.3",
+    "typescript": "^5.3.3"
+  }
+}
