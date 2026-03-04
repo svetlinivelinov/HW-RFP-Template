@@ -1,4 +1,17 @@
 /**
+ * Per-block metadata computed from the template
+ */
+export interface BlockManifestEntry {
+  name: string;
+  title: string;
+  occurrences: number;
+  inferredCategory: string;
+  description: string;
+  fieldsUsed: string[];
+  tablesUsed: string[];
+}
+
+/**
  * Represents the structure of a template
  */
 export interface TemplateManifest {
@@ -6,6 +19,12 @@ export interface TemplateManifest {
   placeholders: string[];
   tables: Record<string, string[]>; // table name -> column names
   statics: string[];
+  /** Extended per-block metadata with fieldsUsed / tablesUsed */
+  blockEntries: BlockManifestEntry[];
+  /** Reverse index: placeholder name -> block names that use it */
+  fieldToBlocks: Record<string, string[]>;
+  /** Reverse index: table name -> block names that use it */
+  tableToBlocks: Record<string, string[]>;
 }
 
 /**

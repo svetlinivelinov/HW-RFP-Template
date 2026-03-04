@@ -1,5 +1,5 @@
 import JSZip from 'jszip';
-import { TemplateManifest } from './types.js';
+import { BlockManifestEntry, TemplateManifest } from './types.js';
 import {
   parseXML,
   getParagraphs,
@@ -23,6 +23,53 @@ const PATTERNS = {
 };
 
 /**
+ * Default category mapping for known block names (used when no block_meta override exists)
+ */
+const DEFAULT_CATEGORY_MAP: Record<string, string> = {
+  cover_page: 'Core',
+  revision_history: 'Core',
+  table_of_contents: 'Core',
+  abbreviations: 'Core',
+  executive_summary: 'Core',
+  basis_of_proposal: 'Core',
+  design_basis: 'Design',
+  assumptions_and_exclusions: 'Design',
+  icss_system: 'Systems',
+  deliverables_and_receivables: 'Project',
+  project_execution: 'Project',
+  annexures: 'Annexes',
+};
+
+/**
+ * Infer a human-readable title from a snake_case block name
+ */
+function inferTitle(blockName: string): string {
+  return blockName
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, l => l.toUpperCase());
+}
+
+/**
+ * Infer category for a block name, falling back to 'General' if unknown
+ */
+function inferCategory(blockName: string): string {
+  return DEFAULT_CATEGORY_MAP[blockName] ?? 'General';
+}
+
+/**
+ * Extract the text content of a block region (between BLOCK and END markers)
+ * Returns empty string if markers are not found
+ */
+function extractBlockRegion(fullText: string, blockName: string): string {
+  const startMarker = `[[BLOCK:${blockName}]]`;
+  const endMarker = `[[END:${blockName}]]`;
+  const startIdx = fullText.indexOf(startMarker);
+  const endIdx = fullText.indexOf(endMarker);
+  if (startIdx === -1 || endIdx === -1 || endIdx <= startIdx) return '';
+  return fullText.substring(startIdx + startMarker.length, endIdx);
+}
+
+/**
  * Parse a DOCX template buffer and extract its manifest
  * @param docxBuffer - The raw DOCX file buffer
  * @returns Template manifest with blocks, placeholders, tables, and statics
@@ -43,6 +90,9 @@ export async function parseTemplate(docxBuffer: Buffer): Promise<TemplateManifes
     placeholders: [],
     tables: {},
     statics: [],
+    blockEntries: [],
+    fieldToBlocks: {},
+    tableToBlocks: {},
   };
   
   // Extract blocks and statics from paragraphs
@@ -92,6 +142,53 @@ export async function parseTemplate(docxBuffer: Buffer): Promise<TemplateManifes
     }
   }
   
+  // Build per-block metadata (fieldsUsed, tablesUsed, category, etc.)
+  const fieldToBlocks: Record<string, string[]> = {};
+  const tableToBlocks: Record<string, string[]> = {};
+
+  const blockEntries: BlockManifestEntry[] = manifest.blocks.map(blockName => {
+    const region = extractBlockRegion(fullText, blockName);
+
+    // Scan region for {{placeholders}}
+    const fieldsUsed = [...new Set(
+      Array.from(region.matchAll(/\{\{([^}]+)\}\}/g)).map(m => m[1])
+    )];
+
+    // Scan region for [[TABLE:name]]
+    const tablesUsed = [...new Set(
+      Array.from(region.matchAll(/\[\[TABLE:([^\]]+)\]\]/g)).map(m => m[1])
+    )];
+
+    // Count occurrences of the block start marker in full text
+    const occurrences = Array.from(
+      fullText.matchAll(new RegExp(`\\[\\[BLOCK:${blockName}\\]\\]`, 'g'))
+    ).length;
+
+    // Build reverse indexes
+    for (const field of fieldsUsed) {
+      if (!fieldToBlocks[field]) fieldToBlocks[field] = [];
+      if (!fieldToBlocks[field].includes(blockName)) fieldToBlocks[field].push(blockName);
+    }
+    for (const table of tablesUsed) {
+      if (!tableToBlocks[table]) tableToBlocks[table] = [];
+      if (!tableToBlocks[table].includes(blockName)) tableToBlocks[table].push(blockName);
+    }
+
+    return {
+      name: blockName,
+      title: inferTitle(blockName),
+      occurrences,
+      inferredCategory: inferCategory(blockName),
+      description: '',
+      fieldsUsed,
+      tablesUsed,
+    };
+  });
+
+  manifest.blockEntries = blockEntries;
+  manifest.fieldToBlocks = fieldToBlocks;
+  manifest.tableToBlocks = tableToBlocks;
+
   return manifest;
 }
 

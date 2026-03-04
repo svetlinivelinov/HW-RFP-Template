@@ -45,6 +45,18 @@ export function initializeDatabase() {
     )
   `);
 
+  // Block metadata table (optional overrides for title/category/description/sort_order)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS block_meta (
+      block_name TEXT PRIMARY KEY,
+      title TEXT,
+      category TEXT,
+      description TEXT,
+      sort_order INTEGER DEFAULT 0,
+      is_optional INTEGER DEFAULT 1
+    )
+  `);
+
   console.log('Database initialized');
 }
 
@@ -108,5 +120,50 @@ export const fileRepository = {
   findByDraftId(draftId: string) {
     const stmt = db.prepare('SELECT * FROM files WHERE draft_id = ? ORDER BY created_at DESC');
     return stmt.all(draftId) as Array<{ id: string; draft_id: string; path: string; mime: string; created_at: string }>;
+  },
+};
+
+/**
+ * Block metadata repository — stores optional UI overrides per block
+ */
+export interface BlockMeta {
+  block_name: string;
+  title: string | null;
+  category: string | null;
+  description: string | null;
+  sort_order: number;
+  is_optional: number;
+}
+
+export const blockMetaRepository = {
+  findAll(): BlockMeta[] {
+    const stmt = db.prepare('SELECT * FROM block_meta ORDER BY sort_order ASC, block_name ASC');
+    return stmt.all() as BlockMeta[];
+  },
+
+  findByName(blockName: string): BlockMeta | undefined {
+    const stmt = db.prepare('SELECT * FROM block_meta WHERE block_name = ?');
+    return stmt.get(blockName) as BlockMeta | undefined;
+  },
+
+  upsert(meta: Partial<BlockMeta> & { block_name: string }): void {
+    const stmt = db.prepare(`
+      INSERT INTO block_meta (block_name, title, category, description, sort_order, is_optional)
+      VALUES (@block_name, @title, @category, @description, @sort_order, @is_optional)
+      ON CONFLICT(block_name) DO UPDATE SET
+        title = COALESCE(@title, title),
+        category = COALESCE(@category, category),
+        description = COALESCE(@description, description),
+        sort_order = COALESCE(@sort_order, sort_order),
+        is_optional = COALESCE(@is_optional, is_optional)
+    `);
+    stmt.run({
+      block_name: meta.block_name,
+      title: meta.title ?? null,
+      category: meta.category ?? null,
+      description: meta.description ?? null,
+      sort_order: meta.sort_order ?? 0,
+      is_optional: meta.is_optional ?? 1,
+    });
   },
 };
