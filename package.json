@@ -1,8 +1,8 @@
 {
-  "name": "docx-template-app",
+  "name": "hw-rfp-template",
   "version": "1.0.0",
   "private": true,
-  "description": "Minimal web app for Word template processing",
+  "description": "HW RFP Template web app for Word template processing",
   "scripts": {
     "dev": "pnpm --filter @app/web dev & pnpm --filter @app/api dev",
     "build": "pnpm -r build",

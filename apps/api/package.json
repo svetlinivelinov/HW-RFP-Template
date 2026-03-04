@@ -1,12 +1,12 @@
 {
   "name": "@app/api",
   "version": "1.0.0",
-  "description": "Backend API for DOCX template app",
+  "description": "Backend API for HW RFP Template",
   "type": "module",
   "main": "./dist/index.js",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsc",
+    "build": "tsc --build --force",
     "start": "node dist/index.js",
     "clean": "rm -rf dist"
   },

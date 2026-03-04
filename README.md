@@ -1,6 +1,6 @@
-# DOCX Template App
+# HW RFP Template
 
-Minimal web app for Word document template processing with toggleable blocks, placeholders, and table rendering.
+Web app for Honeywell RFP Word template processing with toggleable blocks, placeholders, and table rendering.
 
 ## Tech Stack
 
