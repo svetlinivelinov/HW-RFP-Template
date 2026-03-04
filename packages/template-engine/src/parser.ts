@@ -26,17 +26,30 @@ const PATTERNS = {
  * Default category mapping for known block names (used when no block_meta override exists)
  */
 const DEFAULT_CATEGORY_MAP: Record<string, string> = {
+  // Core — always present, structural sections
   cover_page: 'Core',
   revision_history: 'Core',
   table_of_contents: 'Core',
   abbreviations: 'Core',
+  definitions: 'Core',
   executive_summary: 'Core',
   basis_of_proposal: 'Core',
+  // Design — scope / engineering basis
   design_basis: 'Design',
   assumptions_and_exclusions: 'Design',
+  // Systems — one entry per system/discipline
   icss_system: 'Systems',
+  telephone_system: 'Systems',
+  lan_wan_system: 'Systems',
+  cctv_system: 'Systems',
+  paga_system: 'Systems',
+  structured_cabling_system: 'Systems',
+  // Project — execution, commercial, deliverables
   deliverables_and_receivables: 'Project',
   project_execution: 'Project',
+  project_execution_plan: 'Project',
+  bill_of_materials: 'Project',
+  // Annexes
   annexures: 'Annexes',
 };
 
