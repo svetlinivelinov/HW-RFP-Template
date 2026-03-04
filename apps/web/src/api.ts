@@ -27,6 +27,27 @@ export interface TemplateManifest {
   statics: string[];
 }
 
+export interface BlockLibraryEntry {
+  name: string;
+  title: string;
+  category: string;
+  description: string;
+  sortOrder: number;
+  isOptional: boolean;
+  occurrences: number;
+  fieldsUsed: string[];
+  tablesUsed: string[];
+}
+
+export type BlockState = 'Empty' | 'Partial' | 'Complete';
+
+export interface BlockStatus {
+  name: string;
+  enabled: boolean;
+  completionPercent: number;
+  state: BlockState;
+}
+
 export interface RenderResponse {
   fileId: string;
   filename: string;
@@ -71,6 +92,29 @@ export const api = {
   // Template
   async getTemplateManifest(): Promise<TemplateManifest> {
     const { data } = await axios.get(`${API_BASE}/template/manifest`);
+    return data;
+  },
+
+  async getBlockLibrary(): Promise<BlockLibraryEntry[]> {
+    const { data } = await axios.get(`${API_BASE}/template/block-library`);
+    return data;
+  },
+
+  async updateBlockMeta(
+    blockName: string,
+    updates: {
+      title?: string;
+      category?: string;
+      description?: string;
+      sortOrder?: number;
+      isOptional?: boolean;
+    }
+  ): Promise<void> {
+    await axios.patch(`${API_BASE}/template/block-meta`, { blockName, ...updates });
+  },
+
+  async getBlockStatus(draftId: string): Promise<BlockStatus[]> {
+    const { data } = await axios.get(`${API_BASE}/drafts/${draftId}/block-status`);
     return data;
   },
 

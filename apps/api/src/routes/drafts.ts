@@ -13,6 +13,16 @@ const __dirname = dirname(__filename);
 // Path to the built-in template
 const TEMPLATE_PATH = resolve(__dirname, '../../../../assets/template/master_template_v2_1_skeleton.docx');
 
+// Module-level manifest cache (shared across draft route calls)
+let cachedManifest: any = null;
+async function getManifest() {
+  if (!cachedManifest) {
+    const templateBuffer = readFileSync(TEMPLATE_PATH);
+    cachedManifest = await parseTemplate(templateBuffer);
+  }
+  return cachedManifest;
+}
+
 // Validation schemas
 const CreateDraftSchema = z.object({
   name: z.string().min(1).max(255),
@@ -42,11 +52,10 @@ export async function draftRoutes(fastify: FastifyInstance) {
     let defaultBlocks: Record<string, boolean> = {};
     
     try {
-      const templateBuffer = readFileSync(TEMPLATE_PATH);
-      const manifest = await parseTemplate(templateBuffer);
+      const manifest = await getManifest();
       
       // Default all blocks to true
-      manifest.blocks.forEach(blockName => {
+      manifest.blocks.forEach((blockName: string) => {
         defaultBlocks[blockName] = true;
       });
     } catch (err) {
@@ -159,5 +168,65 @@ export async function draftRoutes(fastify: FastifyInstance) {
     draftRepository.delete(id);
     
     return { success: true };
+  });
+
+  /**
+   * GET /api/drafts/:id/block-status
+   * Returns per-block completion state for a draft:
+   *   enabled, completionPercent, state (Empty | Partial | Complete)
+   */
+  fastify.get('/:id/block-status', async (request, reply) => {
+    const { id } = request.params as { id: string };
+
+    const draft = draftRepository.findById(id);
+    if (!draft) {
+      return reply.status(404).send({ error: 'Draft not found' });
+    }
+
+    let manifest: any;
+    try {
+      manifest = await getManifest();
+    } catch (err) {
+      fastify.log.error({ err }, 'Failed to load template for block-status');
+      return reply.status(500).send({ error: 'Failed to load template' });
+    }
+
+    const data = JSON.parse(draft.draft_json);
+
+    const statuses = manifest.blockEntries.map((entry: any) => {
+      const enabled: boolean = data.blocks?.[entry.name] ?? false;
+
+      const totalItems = entry.fieldsUsed.length + entry.tablesUsed.length;
+      let filledItems = 0;
+
+      for (const field of entry.fieldsUsed) {
+        if (data.values?.[field] && String(data.values[field]).trim() !== '') {
+          filledItems++;
+        }
+      }
+      for (const table of entry.tablesUsed) {
+        if (Array.isArray(data.tables?.[table]) && data.tables[table].length > 0) {
+          filledItems++;
+        }
+      }
+
+      let state: 'Empty' | 'Partial' | 'Complete';
+      let completionPercent: number;
+
+      if (totalItems === 0) {
+        // Block has no tracked content — completion is driven by enabled state
+        completionPercent = 100;
+        state = enabled ? 'Complete' : 'Empty';
+      } else {
+        completionPercent = Math.round((filledItems / totalItems) * 100);
+        if (filledItems === 0) state = 'Empty';
+        else if (filledItems < totalItems) state = 'Partial';
+        else state = 'Complete';
+      }
+
+      return { name: entry.name, enabled, completionPercent, state };
+    });
+
+    return statuses;
   });
 }

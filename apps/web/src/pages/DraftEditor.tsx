@@ -1,57 +1,34 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
-  Container,
   Box,
   Typography,
   Button,
-  Paper,
   AppBar,
   Toolbar,
   IconButton,
-  Tabs,
-  Tab,
   CircularProgress,
   Alert,
   TextField,
+  Container,
 } from '@mui/material';
 import {
   ArrowBack as ArrowBackIcon,
   Download as DownloadIcon,
   Save as SaveIcon,
 } from '@mui/icons-material';
-import { api } from '../api';
-import BlocksTab from '../components/BlocksTab';
-import FieldsTab from '../components/FieldsTab';
-import TablesTab from '../components/TablesTab';
+import { api, BlockStatus } from '../api';
+import BlockLibrarySidebar from '../components/BlockLibrarySidebar';
+import BlockEditorPanel from '../components/BlockEditorPanel';
+import GlobalFieldSearch from '../components/GlobalFieldSearch';
 
-interface TabPanelProps {
-  children?: React.ReactNode;
-  index: number;
-  value: number;
-}
-
-function TabPanel(props: TabPanelProps) {
-  const { children, value, index, ...other } = props;
-  return (
-    <div
-      role="tabpanel"
-      hidden={value !== index}
-      id={`tabpanel-${index}`}
-      aria-labelledby={`tab-${index}`}
-      {...other}
-    >
-      {value === index && <Box sx={{ p: 3 }}>{children}</Box>}
-    </div>
-  );
-}
 
 export default function DraftEditor() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const [currentTab, setCurrentTab] = useState(0);
+  const [selectedBlock, setSelectedBlock] = useState<string | null>(null);
   const [draftName, setDraftName] = useState('');
   const [blocks, setBlocks] = useState<Record<string, boolean>>({});
   const [values, setValues] = useState<Record<string, string>>({});
@@ -72,6 +49,27 @@ export default function DraftEditor() {
     queryFn: () => api.getTemplateManifest(),
   });
 
+  // Fetch block library (merged parsed + DB overrides)
+  const { data: blockLibrary = [] } = useQuery({
+    queryKey: ['blockLibrary'],
+    queryFn: () => api.getBlockLibrary(),
+  });
+
+  // Fetch block statuses for this draft (completion / enabled state)
+  const { data: blockStatusList = [] } = useQuery({
+    queryKey: ['blockStatus', id],
+    queryFn: () => api.getBlockStatus(id!),
+    enabled: !!id,
+    refetchInterval: 0, // only refetch after save
+  });
+
+  // O(1) status lookups keyed by block name
+  const blockStatuses = useMemo(
+    () =>
+      Object.fromEntries(blockStatusList.map(s => [s.name, s])) as Record<string, BlockStatus>,
+    [blockStatusList],
+  );
+
   // Update local state when draft loads
   useEffect(() => {
     if (draft) {
@@ -82,7 +80,14 @@ export default function DraftEditor() {
     }
   }, [draft]);
 
-  // Save draft mutation
+  // Auto-select first block when library loads and nothing is selected
+  useEffect(() => {
+    if (!selectedBlock && blockLibrary.length > 0) {
+      setSelectedBlock(blockLibrary[0].name);
+    }
+  }, [blockLibrary, selectedBlock]);
+
+  // Save mutation — also refreshes block-status badges
   const saveMutation = useMutation({
     mutationFn: async () => {
       await api.updateDraft(id!, { blocks, values, tables });
@@ -92,43 +97,32 @@ export default function DraftEditor() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['draft', id] });
+      queryClient.invalidateQueries({ queryKey: ['blockStatus', id] });
       setHasChanges(false);
     },
   });
 
-  // Render mutation
+  // Render (export DOCX) mutation
   const renderMutation = useMutation({
     mutationFn: () => api.renderDraft(id!),
     onSuccess: (data) => {
       setLastFileId(data.fileId);
-      // Auto-download
       window.location.href = api.getDownloadUrl(data.fileId);
     },
   });
 
-  const handleSave = () => {
-    saveMutation.mutate();
-  };
+  const handleSave = () => saveMutation.mutate();
 
   const handleExport = () => {
     if (hasChanges) {
       if (confirm('You have unsaved changes. Save before exporting?')) {
-        saveMutation.mutate(undefined, {
-          onSuccess: () => {
-            renderMutation.mutate();
-          },
-        });
+        saveMutation.mutate(undefined, { onSuccess: () => renderMutation.mutate() });
       } else {
         renderMutation.mutate();
       }
     } else {
       renderMutation.mutate();
     }
-  };
-
-  const updateBlocks = (newBlocks: Record<string, boolean>) => {
-    setBlocks(newBlocks);
-    setHasChanges(true);
   };
 
   const updateValues = (newValues: Record<string, string>) => {
@@ -141,14 +135,32 @@ export default function DraftEditor() {
     setHasChanges(true);
   };
 
-  const updateDraftName = (name: string) => {
-    setDraftName(name);
+  const handleToggleBlock = (name: string, enabled: boolean) => {
+    setBlocks(prev => ({ ...prev, [name]: enabled }));
+    setHasChanges(true);
+  };
+
+  /** Clear all fields and table rows that belong to a given block */
+  const handleClearBlock = (blockName: string) => {
+    const entry = blockLibrary.find(e => e.name === blockName);
+    if (!entry) return;
+
+    const newValues = { ...values };
+    for (const field of entry.fieldsUsed) {
+      newValues[field] = '';
+    }
+    const newTables = { ...tables };
+    for (const table of entry.tablesUsed) {
+      newTables[table] = [];
+    }
+    setValues(newValues);
+    setTables(newTables);
     setHasChanges(true);
   };
 
   if (draftLoading || manifestLoading) {
     return (
-      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh' }}>
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
         <CircularProgress />
       </Box>
     );
@@ -158,7 +170,8 @@ export default function DraftEditor() {
     return (
       <Container maxWidth="md" sx={{ py: 4 }}>
         <Alert severity="error">
-          Failed to load draft: {draftError instanceof Error ? draftError.message : 'Unknown error'}
+          Failed to load draft:{' '}
+          {draftError instanceof Error ? draftError.message : 'Unknown error'}
         </Alert>
         <Button onClick={() => navigate('/')} sx={{ mt: 2 }}>
           Back to Drafts
@@ -167,34 +180,32 @@ export default function DraftEditor() {
     );
   }
 
-  if (!draft || !manifest) {
-    return null;
-  }
+  if (!draft || !manifest) return null;
+
+  const selectedEntry = blockLibrary.find(e => e.name === selectedBlock) ?? null;
+  const selectedStatus = selectedBlock ? (blockStatuses[selectedBlock] ?? null) : null;
 
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
-      <AppBar position="static">
+    <Box sx={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
+      {/* Top AppBar */}
+      <AppBar position="static" sx={{ flexShrink: 0 }}>
         <Toolbar>
-          <IconButton
-            edge="start"
-            color="inherit"
-            onClick={() => navigate('/')}
-            sx={{ mr: 2 }}
-          >
+          <IconButton edge="start" color="inherit" onClick={() => navigate('/')} sx={{ mr: 2 }}>
             <ArrowBackIcon />
           </IconButton>
           <TextField
             value={draftName}
-            onChange={(e) => updateDraftName(e.target.value)}
-            variant="standard"
-            InputProps={{
-              style: { color: 'white', fontSize: '1.25rem' },
+            onChange={e => {
+              setDraftName(e.target.value);
+              setHasChanges(true);
             }}
+            variant="standard"
+            InputProps={{ style: { color: 'white', fontSize: '1.25rem' } }}
             sx={{ flexGrow: 1 }}
           />
-          <Box sx={{ display: 'flex', gap: 1, ml: 2 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, ml: 2 }}>
             {hasChanges && (
-              <Typography variant="body2" sx={{ alignSelf: 'center', mr: 1 }}>
+              <Typography variant="body2" sx={{ opacity: 0.8 }}>
                 Unsaved changes
               </Typography>
             )}
@@ -218,59 +229,80 @@ export default function DraftEditor() {
         </Toolbar>
       </AppBar>
 
-      <Container maxWidth="lg" sx={{ flexGrow: 1, py: 3 }}>
-        {saveMutation.isError && (
-          <Alert severity="error" sx={{ mb: 2 }}>
-            Failed to save: {saveMutation.error instanceof Error ? saveMutation.error.message : 'Unknown error'}
-          </Alert>
-        )}
-        {renderMutation.isError && (
-          <Alert severity="error" sx={{ mb: 2 }}>
-            Failed to export: {renderMutation.error instanceof Error ? renderMutation.error.message : 'Unknown error'}
-          </Alert>
-        )}
+      {/* Error banners */}
+      {(saveMutation.isError || renderMutation.isError) && (
+        <Box sx={{ flexShrink: 0, px: 2, pt: 1 }}>
+          {saveMutation.isError && (
+            <Alert severity="error" sx={{ mb: 1 }}>
+              Save failed:{' '}
+              {saveMutation.error instanceof Error ? saveMutation.error.message : 'Unknown error'}
+            </Alert>
+          )}
+          {renderMutation.isError && (
+            <Alert severity="error" sx={{ mb: 1 }}>
+              Export failed:{' '}
+              {renderMutation.error instanceof Error
+                ? renderMutation.error.message
+                : 'Unknown error'}
+            </Alert>
+          )}
+        </Box>
+      )}
 
-        <Paper>
-          <Tabs value={currentTab} onChange={(_, newValue) => setCurrentTab(newValue)}>
-            <Tab label="Blocks" />
-            <Tab label="Fields" />
-            <Tab label="Tables" />
-          </Tabs>
+      {/* Main content: Sidebar + Editor */}
+      <Box sx={{ display: 'flex', flexGrow: 1, overflow: 'hidden' }}>
+        {/* Left: Block Library Sidebar */}
+        <BlockLibrarySidebar
+          blockLibrary={blockLibrary}
+          blockStatuses={blockStatuses}
+          blocks={blocks}
+          selectedBlock={selectedBlock}
+          onSelectBlock={setSelectedBlock}
+          onToggleBlock={handleToggleBlock}
+        />
 
-          <TabPanel value={currentTab} index={0}>
-            <BlocksTab
-              blocks={blocks}
-              availableBlocks={manifest.blocks}
-              onChange={updateBlocks}
+        {/* Right: Field search + Block editor */}
+        <Box sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+          {/* Global field search */}
+          <Box sx={{ p: 1.5, borderBottom: 1, borderColor: 'divider', flexShrink: 0 }}>
+            <GlobalFieldSearch
+              blockLibrary={blockLibrary}
+              onSelectBlock={setSelectedBlock}
             />
-          </TabPanel>
+          </Box>
 
-          <TabPanel value={currentTab} index={1}>
-            <FieldsTab
+          {/* Block editor panel */}
+          <Box sx={{ flexGrow: 1, overflow: 'hidden' }}>
+            <BlockEditorPanel
+              selectedEntry={selectedEntry}
+              blockStatus={selectedStatus}
               values={values}
-              availablePlaceholders={manifest.placeholders}
-              onChange={updateValues}
-            />
-          </TabPanel>
-
-          <TabPanel value={currentTab} index={2}>
-            <TablesTab
               tables={tables}
-              availableTables={manifest.tables}
-              onChange={updateTables}
+              manifest={manifest}
+              onValuesChange={updateValues}
+              onTablesChange={updateTables}
+              onClearBlock={handleClearBlock}
             />
-          </TabPanel>
-        </Paper>
+          </Box>
+        </Box>
+      </Box>
 
-        {lastFileId && (
-          <Alert severity="success" sx={{ mt: 2 }}>
-            Document exported successfully!{' '}
-            <Button size="small" href={api.getDownloadUrl(lastFileId)}>
-              Download Again
-            </Button>
+      {/* Export success toast */}
+      {lastFileId && (
+        <Box sx={{ position: 'fixed', bottom: 16, right: 16, zIndex: 1400 }}>
+          <Alert
+            severity="success"
+            onClose={() => setLastFileId(null)}
+            action={
+              <Button size="small" href={api.getDownloadUrl(lastFileId)}>
+                Download Again
+              </Button>
+            }
+          >
+            Document exported successfully!
           </Alert>
-        )}
-      </Container>
+        </Box>
+      )}
     </Box>
   );
 }
