@@ -149,7 +149,19 @@ export default function DraftEditor() {
   const handleApplyVariant = async (blockName: string, variantId: string) => {
     await api.applyBlockVariant(id!, blockName, variantId);
     setBlockVariants(prev => ({ ...prev, [blockName]: variantId }));
-    queryClient.invalidateQueries({ queryKey: ['draft', id] });
+    queryClient.setQueryData(['draft', id], (prevDraft: any) => {
+      if (!prevDraft) return prevDraft;
+      return {
+        ...prevDraft,
+        data: {
+          ...prevDraft.data,
+          blockVariants: {
+            ...(prevDraft.data?.blockVariants ?? {}),
+            [blockName]: variantId,
+          },
+        },
+      };
+    });
     queryClient.invalidateQueries({ queryKey: ['blockStatus', id] });
   };
 
