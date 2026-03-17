@@ -21,6 +21,8 @@ const STATE_COLOR: Record<BlockState, 'default' | 'warning' | 'success'> = {
   Empty: 'default',
 };
 
+const CATEGORY_ORDER = ['Core', 'Design', 'Systems', 'Project', 'Annexes'] as const;
+
 interface Props {
   blockLibrary: BlockLibraryEntry[];
   blockStatuses: Record<string, BlockStatus>;
@@ -58,7 +60,20 @@ export default function BlockLibrarySidebar({
     [filtered],
   );
 
-  const categories = useMemo(() => Object.keys(grouped).sort(), [grouped]);
+  const categories = useMemo(() => {
+    return Object.keys(grouped).sort((a, b) => {
+      const ai = CATEGORY_ORDER.indexOf(a as (typeof CATEGORY_ORDER)[number]);
+      const bi = CATEGORY_ORDER.indexOf(b as (typeof CATEGORY_ORDER)[number]);
+
+      const aKnown = ai !== -1;
+      const bKnown = bi !== -1;
+
+      if (aKnown && bKnown) return ai - bi;
+      if (aKnown) return -1;
+      if (bKnown) return 1;
+      return a.localeCompare(b);
+    });
+  }, [grouped]);
 
   return (
     <Box

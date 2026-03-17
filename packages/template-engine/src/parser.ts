@@ -51,6 +51,9 @@ const DEFAULT_CATEGORY_MAP: Record<string, string> = {
   bill_of_materials: 'Project',
   // Annexes
   annexures: 'Annexes',
+  appendix_a_typical_integrated_telecom_security_system_architecture: 'Annexes',
+  appendix_b_bill_of_material: 'Annexes',
+  appendix_c_datasheets: 'Annexes',
 };
 
 /**

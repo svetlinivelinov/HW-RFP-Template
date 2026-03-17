@@ -60,20 +60,54 @@ export default function DraftEditor() {
     queryFn: () => api.getBlockLibrary(),
   });
 
-  // Fetch block statuses for this draft (completion / enabled state)
-  const { data: blockStatusList = [] } = useQuery({
-    queryKey: ['blockStatus', id],
-    queryFn: () => api.getBlockStatus(id!),
-    enabled: !!id,
-    refetchInterval: 0, // only refetch after save
-  });
+  // Compute statuses from local editor state so badges/toggles stay in sync with unsaved edits.
+  const blockStatuses = useMemo(() => {
+    const byName: Record<string, BlockStatus> = {};
 
-  // O(1) status lookups keyed by block name
-  const blockStatuses = useMemo(
-    () =>
-      Object.fromEntries(blockStatusList.map(s => [s.name, s])) as Record<string, BlockStatus>,
-    [blockStatusList],
-  );
+    for (const entry of blockLibrary) {
+      const enabled = blocks[entry.name] !== false;
+      const totalItems = entry.fieldsUsed.length + entry.tablesUsed.length;
+
+      let filledItems = 0;
+      for (const field of entry.fieldsUsed) {
+        if ((values[field] ?? '').trim() !== '') {
+          filledItems++;
+        }
+      }
+      for (const table of entry.tablesUsed) {
+        if (Array.isArray(tables[table]) && tables[table].length > 0) {
+          filledItems++;
+        }
+      }
+
+      const hasVariant = Boolean(blockVariants[entry.name]);
+
+      let state: BlockStatus['state'];
+      let completionPercent: number;
+
+      if (hasVariant) {
+        completionPercent = 100;
+        state = 'Complete';
+      } else if (totalItems === 0) {
+        completionPercent = 100;
+        state = enabled ? 'Complete' : 'Empty';
+      } else {
+        completionPercent = Math.round((filledItems / totalItems) * 100);
+        if (filledItems === 0) state = 'Empty';
+        else if (filledItems < totalItems) state = 'Partial';
+        else state = 'Complete';
+      }
+
+      byName[entry.name] = {
+        name: entry.name,
+        enabled,
+        completionPercent,
+        state,
+      };
+    }
+
+    return byName;
+  }, [blockLibrary, blocks, values, tables, blockVariants]);
 
   // Update local state when draft loads
   useEffect(() => {
@@ -103,7 +137,6 @@ export default function DraftEditor() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['draft', id] });
-      queryClient.invalidateQueries({ queryKey: ['blockStatus', id] });
       setHasChanges(false);
     },
   });
@@ -149,20 +182,6 @@ export default function DraftEditor() {
   const handleApplyVariant = async (blockName: string, variantId: string) => {
     await api.applyBlockVariant(id!, blockName, variantId);
     setBlockVariants(prev => ({ ...prev, [blockName]: variantId }));
-    queryClient.setQueryData(['draft', id], (prevDraft: any) => {
-      if (!prevDraft) return prevDraft;
-      return {
-        ...prevDraft,
-        data: {
-          ...prevDraft.data,
-          blockVariants: {
-            ...(prevDraft.data?.blockVariants ?? {}),
-            [blockName]: variantId,
-          },
-        },
-      };
-    });
-    queryClient.invalidateQueries({ queryKey: ['blockStatus', id] });
   };
 
   /** Clear all fields, table rows, and applied block variant for a given block */
@@ -189,7 +208,6 @@ export default function DraftEditor() {
         return next;
       });
       await api.updateDraft(id!, { blockVariants: { [blockName]: null } });
-      queryClient.invalidateQueries({ queryKey: ['blockStatus', id] });
     }
 
     setHasChanges(true);

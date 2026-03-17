@@ -72,8 +72,31 @@ Start-Job -ScriptBlock {
     }
 } -ArgumentList $scriptRoot, [bool]$pnpmCmd, ($pnpmCmd.Source), ($corepackCmd.Source) -Name "API-Server" | Out-Null
 
-# Wait for API to start
-Start-Sleep 3
+# Wait for API to become healthy so failures are visible before starting web
+$apiReady = $false
+for ($i = 0; $i -lt 45; $i++) {
+    Start-Sleep 1
+    try {
+        $health = Invoke-WebRequest -UseBasicParsing "http://localhost:3001/api/health" -TimeoutSec 2
+        if ($health.StatusCode -eq 200) {
+            $apiReady = $true
+            break
+        }
+    }
+    catch {
+        # Keep retrying until timeout
+    }
+}
+
+if (-not $apiReady) {
+    Write-Host "`nAPI health probe timed out on http://localhost:3001." -ForegroundColor Yellow
+    Write-Host "API job output:" -ForegroundColor Yellow
+    Receive-Job -Name "API-Server" -Keep -ErrorAction SilentlyContinue
+    Write-Host "Continuing to start web server anyway. Verify API at /api/health." -ForegroundColor Yellow
+}
+else {
+    Write-Host "API is healthy." -ForegroundColor Green
+}
 
 # Start Web server in current window
 Set-Location (Join-Path $scriptRoot "apps\web")

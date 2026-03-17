@@ -55,6 +55,17 @@ async function start() {
     return { status: 'ok' };
   });
 
+  // Helpful root response in development when API and web run on separate ports.
+  if (!isProd) {
+    fastify.get('/', async () => {
+      return {
+        message: 'API server is running',
+        webApp: 'http://localhost:3000',
+        health: '/api/health',
+      };
+    });
+  }
+
   // Serve static files in production
   if (isProd) {
     const webDistPath = resolve(__dirname, '../../web/dist');
