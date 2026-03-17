@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import {
   Box,
   Typography,
@@ -41,19 +41,24 @@ export default function BlockLibrarySidebar({
   const [search, setSearch] = useState('');
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
 
-  const filtered = blockLibrary.filter(
-    b =>
-      b.title.toLowerCase().includes(search.toLowerCase()) ||
-      b.category.toLowerCase().includes(search.toLowerCase()),
+  const filtered = useMemo(() => {
+    const q = search.toLowerCase();
+    return blockLibrary.filter(
+      b => b.title.toLowerCase().includes(q) || b.category.toLowerCase().includes(q),
+    );
+  }, [blockLibrary, search]);
+
+  const grouped = useMemo(
+    () =>
+      filtered.reduce<Record<string, BlockLibraryEntry[]>>((acc, entry) => {
+        if (!acc[entry.category]) acc[entry.category] = [];
+        acc[entry.category].push(entry);
+        return acc;
+      }, {}),
+    [filtered],
   );
 
-  const grouped = filtered.reduce<Record<string, BlockLibraryEntry[]>>((acc, entry) => {
-    if (!acc[entry.category]) acc[entry.category] = [];
-    acc[entry.category].push(entry);
-    return acc;
-  }, {});
-
-  const categories = Object.keys(grouped).sort();
+  const categories = useMemo(() => Object.keys(grouped).sort(), [grouped]);
 
   return (
     <Box

@@ -28,6 +28,23 @@ export function serializeXML(doc: Document): string {
 }
 
 /**
+ * Serialize a single XML element to string
+ */
+export function serializeNode(node: Element): string {
+  return serializer.serializeToString(node);
+}
+
+/**
+ * Parse a fragment of concatenated Word XML elements (e.g. <w:p> nodes)
+ * into an array of Elements, with Word namespaces pre-declared on the root.
+ */
+export function parseXMLFragment(xmlContent: string): Element[] {
+  const wrapped = `<w:body xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">${xmlContent}</w:body>`;
+  const doc = parser.parseFromString(wrapped, 'text/xml');
+  return getChildElements(doc.documentElement);
+}
+
+/**
  * Get text content from a Word run element
  */
 export function getRunText(run: Element): string {

@@ -15,6 +15,7 @@ import {
   cloneRun,
   createRunFromTemplate,
   getChildElements,
+  parseXMLFragment,
 } from './xml-utils.js';
 
 /**
@@ -35,7 +36,11 @@ const PATTERNS = {
  * @param draftData - The draft data containing blocks, values, and tables
  * @returns Rendered DOCX buffer
  */
-export async function render(templateBuffer: Buffer, draftData: DraftData): Promise<Buffer> {
+export async function render(
+  templateBuffer: Buffer,
+  draftData: DraftData,
+  variantXmlMap: Record<string, string> = {},
+): Promise<Buffer> {
   const zip = await JSZip.loadAsync(templateBuffer);
   
   const documentXmlFile = zip.file('word/document.xml');
@@ -47,6 +52,11 @@ export async function render(templateBuffer: Buffer, draftData: DraftData): Prom
   const doc = parseXML(documentXmlString);
   
   // Rendering pipeline (order matters!)
+  // 0. Substitute block content variants (replaces skeleton content with stored XML)
+  if (Object.keys(variantXmlMap).length > 0) {
+    processBlockVariants(doc, variantXmlMap);
+  }
+
   // 1. Expand/Remove Blocks
   processBlocks(doc, draftData.blocks);
   
@@ -72,6 +82,45 @@ export async function render(templateBuffer: Buffer, draftData: DraftData): Prom
   });
   
   return outputBuffer;
+}
+
+/**
+ * Substitute block content variants: replace skeleton paragraph content between
+ * [[BLOCK:name]] and [[END:name]] markers with stored variant XML paragraphs.
+ * This runs BEFORE processBlocks so the marker stripping still happens.
+ */
+function processBlockVariants(doc: Document, variantXmlMap: Record<string, string>): void {
+  for (const [blockName, contentXml] of Object.entries(variantXmlMap)) {
+    if (!contentXml.trim()) continue;
+
+    const paragraphs = getParagraphs(doc);
+    let startIdx = -1;
+    let endIdx = -1;
+
+    for (let i = 0; i < paragraphs.length; i++) {
+      consolidateRunsForMarker(paragraphs[i], new RegExp(`\\[\\[BLOCK:${blockName}\\]\\]`));
+      consolidateRunsForMarker(paragraphs[i], new RegExp(`\\[\\[END:${blockName}\\]\\]`));
+      const text = getParagraphText(paragraphs[i]);
+      if (text.includes(`[[BLOCK:${blockName}]]`)) startIdx = i;
+      else if (startIdx !== -1 && text.includes(`[[END:${blockName}]]`)) { endIdx = i; break; }
+    }
+
+    if (startIdx === -1 || endIdx === -1 || endIdx <= startIdx) continue;
+
+    const endMarkerParagraph = paragraphs[endIdx];
+
+    // Remove existing skeleton content between markers (keep the markers themselves)
+    for (let i = endIdx - 1; i > startIdx; i--) {
+      paragraphs[i].parentNode?.removeChild(paragraphs[i]);
+    }
+
+    // Parse variant XML and insert paragraphs before the END marker
+    const variantParagraphs = parseXMLFragment(contentXml);
+    for (const p of variantParagraphs) {
+      const imported = doc.importNode(p, true);
+      endMarkerParagraph.parentNode?.insertBefore(imported, endMarkerParagraph);
+    }
+  }
 }
 
 /**

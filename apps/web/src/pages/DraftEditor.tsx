@@ -21,7 +21,9 @@ import {
 import { api, BlockStatus } from '../api';
 import BlockLibrarySidebar from '../components/BlockLibrarySidebar';
 import BlockEditorPanel from '../components/BlockEditorPanel';
+import BlockContentLibraryPanel from '../components/BlockContentLibraryPanel';
 import GlobalFieldSearch from '../components/GlobalFieldSearch';
+import BlockIngestionWizard from '../components/BlockIngestionWizard';
 
 
 export default function DraftEditor() {
@@ -33,8 +35,11 @@ export default function DraftEditor() {
   const [blocks, setBlocks] = useState<Record<string, boolean>>({});
   const [values, setValues] = useState<Record<string, string>>({});
   const [tables, setTables] = useState<Record<string, Record<string, string>[]>>({});
+  const [blockVariants, setBlockVariants] = useState<Record<string, string>>({});
   const [lastFileId, setLastFileId] = useState<string | null>(null);
   const [hasChanges, setHasChanges] = useState(false);
+  const [showWizard, setShowWizard] = useState(false);
+  const [contentLibraryKey, setContentLibraryKey] = useState(0);
 
   // Fetch draft
   const { data: draft, isLoading: draftLoading, error: draftError } = useQuery({
@@ -77,6 +82,7 @@ export default function DraftEditor() {
       setBlocks(draft.data.blocks);
       setValues(draft.data.values);
       setTables(draft.data.tables);
+      setBlockVariants(draft.data.blockVariants ?? {});
     }
   }, [draft]);
 
@@ -90,7 +96,7 @@ export default function DraftEditor() {
   // Save mutation — also refreshes block-status badges
   const saveMutation = useMutation({
     mutationFn: async () => {
-      await api.updateDraft(id!, { blocks, values, tables });
+      await api.updateDraft(id!, { blocks, values, tables, blockVariants });
       if (draftName !== draft?.name) {
         await api.updateDraftName(id!, draftName);
       }
@@ -140,8 +146,15 @@ export default function DraftEditor() {
     setHasChanges(true);
   };
 
-  /** Clear all fields and table rows that belong to a given block */
-  const handleClearBlock = (blockName: string) => {
+  const handleApplyVariant = async (blockName: string, variantId: string) => {
+    await api.applyBlockVariant(id!, blockName, variantId);
+    setBlockVariants(prev => ({ ...prev, [blockName]: variantId }));
+    queryClient.invalidateQueries({ queryKey: ['draft', id] });
+    queryClient.invalidateQueries({ queryKey: ['blockStatus', id] });
+  };
+
+  /** Clear all fields, table rows, and applied block variant for a given block */
+  const handleClearBlock = async (blockName: string) => {
     const entry = blockLibrary.find(e => e.name === blockName);
     if (!entry) return;
 
@@ -155,6 +168,18 @@ export default function DraftEditor() {
     }
     setValues(newValues);
     setTables(newTables);
+
+    // Remove the applied block variant immediately (null signals deletion to the server)
+    if (blockVariants[blockName]) {
+      setBlockVariants(prev => {
+        const next = { ...prev };
+        delete next[blockName];
+        return next;
+      });
+      await api.updateDraft(id!, { blockVariants: { [blockName]: null } });
+      queryClient.invalidateQueries({ queryKey: ['blockStatus', id] });
+    }
+
     setHasChanges(true);
   };
 
@@ -187,6 +212,19 @@ export default function DraftEditor() {
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
+      {/* Ingestion Wizard button */}
+      <Box sx={{ p: 2, borderBottom: 1, borderColor: 'divider', flexShrink: 0 }}>
+        <Button variant="contained" color="secondary" onClick={() => setShowWizard(true)}>
+          Ingest Block Content
+        </Button>
+      </Box>
+      {/* Ingestion Wizard modal */}
+      {showWizard && (
+        <Box sx={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', bgcolor: 'rgba(0,0,0,0.2)', zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <BlockIngestionWizard onComplete={() => { setShowWizard(false); setContentLibraryKey(k => k + 1); }} />
+          <Button sx={{ position: 'absolute', top: 24, right: 24 }} variant="outlined" onClick={() => setShowWizard(false)}>Close</Button>
+        </Box>
+      )}
       {/* Top AppBar */}
       <AppBar position="static" sx={{ flexShrink: 0 }}>
         <Toolbar>
@@ -261,7 +299,7 @@ export default function DraftEditor() {
           onToggleBlock={handleToggleBlock}
         />
 
-        {/* Right: Field search + Block editor */}
+        {/* Center: Field search + Block editor */}
         <Box sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           {/* Global field search */}
           <Box sx={{ p: 1.5, borderBottom: 1, borderColor: 'divider', flexShrink: 0 }}>
@@ -285,6 +323,17 @@ export default function DraftEditor() {
             />
           </Box>
         </Box>
+
+        {/* Right: Block Content Library Panel */}
+        {selectedBlock && (
+          <BlockContentLibraryPanel
+            key={`${selectedBlock}-${contentLibraryKey}`}
+            blockName={selectedBlock}
+            appliedVariantId={blockVariants[selectedBlock]}
+            onApplyVariant={variantId => handleApplyVariant(selectedBlock, variantId)}
+            onRemoveVariant={() => handleClearBlock(selectedBlock)}
+          />
+        )}
       </Box>
 
       {/* Export success toast */}

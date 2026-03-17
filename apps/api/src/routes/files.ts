@@ -1,6 +1,6 @@
 import { FastifyInstance } from 'fastify';
 import { nanoid } from 'nanoid';
-import { draftRepository, fileRepository } from '../db.js';
+import { draftRepository, fileRepository, blockContentRepository } from '../db.js';
 import { render } from '@packages/template-engine';
 import { readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { resolve, dirname } from 'path';
@@ -36,9 +36,18 @@ export async function fileRoutes(fastify: FastifyInstance) {
       
       // Parse draft data
       const draftData = JSON.parse(draft.draft_json);
-      
+
+      // Build variant XML map: look up content_xml for each applied block variant
+      const variantXmlMap: Record<string, string> = {};
+      if (draftData.blockVariants) {
+        for (const [blockName, variantId] of Object.entries(draftData.blockVariants as Record<string, string>)) {
+          const variant = blockContentRepository.findById(variantId);
+          if (variant?.content_xml) variantXmlMap[blockName] = variant.content_xml;
+        }
+      }
+
       // Render document
-      const outputBuffer = await render(templateBuffer, draftData);
+      const outputBuffer = await render(templateBuffer, draftData, variantXmlMap);
       
       // Save output file
       const fileId = nanoid();

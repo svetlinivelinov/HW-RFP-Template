@@ -49,4 +49,6 @@ export interface DraftData {
   blocks: BlocksMap;
   values: ValuesMap;
   tables: TablesMap;
+  /** Optional map of blockName → applied variant content XML (injected at render time) */
+  blockVariants?: Record<string, string>;
 }

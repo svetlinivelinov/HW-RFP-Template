@@ -1,18 +1,6 @@
 import { FastifyInstance } from 'fastify';
-import { parseTemplate } from '@packages/template-engine';
 import { blockMetaRepository } from '../db.js';
-import { readFileSync } from 'fs';
-import { resolve, dirname } from 'path';
-import { fileURLToPath } from 'url';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-
-// Path to the built-in template
-const TEMPLATE_PATH = resolve(__dirname, '../../../../assets/template/master_template_v2_1_skeleton.docx');
-
-// Cache the manifest in memory
-let cachedManifest: any = null;
+import { getManifest } from '../utils/manifest-cache.js';
 
 export async function templateRoutes(fastify: FastifyInstance) {
   /**
@@ -20,20 +8,13 @@ export async function templateRoutes(fastify: FastifyInstance) {
    * Get the template manifest (blocks, placeholders, tables, statics)
    */
   fastify.get('/manifest', async (request, reply) => {
-    if (cachedManifest) {
-      return cachedManifest;
-    }
-    
     try {
-      const templateBuffer = readFileSync(TEMPLATE_PATH);
-      const manifest = await parseTemplate(templateBuffer);
-      cachedManifest = manifest;
-      return manifest;
+      return await getManifest();
     } catch (err) {
       fastify.log.error({ err }, 'Failed to load template');
-      return reply.status(500).send({ 
+      return reply.status(500).send({
         error: 'Failed to load template',
-        message: err instanceof Error ? err.message : 'Unknown error'
+        message: err instanceof Error ? err.message : 'Unknown error',
       });
     }
   });
@@ -45,23 +26,21 @@ export async function templateRoutes(fastify: FastifyInstance) {
    * over the inferred values from the parser.
    */
   fastify.get('/block-library', async (request, reply) => {
-    if (!cachedManifest) {
-      try {
-        const templateBuffer = readFileSync(TEMPLATE_PATH);
-        cachedManifest = await parseTemplate(templateBuffer);
-      } catch (err) {
-        fastify.log.error({ err }, 'Failed to load template for block-library');
-        return reply.status(500).send({
-          error: 'Failed to load template',
-          message: err instanceof Error ? err.message : 'Unknown error',
-        });
-      }
+    let manifest: Awaited<ReturnType<typeof getManifest>>;
+    try {
+      manifest = await getManifest();
+    } catch (err) {
+      fastify.log.error({ err }, 'Failed to load template for block-library');
+      return reply.status(500).send({
+        error: 'Failed to load template',
+        message: err instanceof Error ? err.message : 'Unknown error',
+      });
     }
 
     const metaRows = blockMetaRepository.findAll();
     const metaMap = new Map(metaRows.map(m => [m.block_name, m]));
 
-    const library = cachedManifest.blockEntries.map((entry: any, idx: number) => {
+    const library = manifest.blockEntries.map((entry: any, idx: number) => {
       const meta = metaMap.get(entry.name);
       return {
         name: entry.name,

@@ -2,26 +2,7 @@ import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { nanoid } from 'nanoid';
 import { draftRepository } from '../db.js';
-import { parseTemplate } from '@packages/template-engine';
-import { readFileSync } from 'fs';
-import { resolve, dirname } from 'path';
-import { fileURLToPath } from 'url';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-
-// Path to the built-in template
-const TEMPLATE_PATH = resolve(__dirname, '../../../../assets/template/master_template_v2_1_skeleton.docx');
-
-// Module-level manifest cache (shared across draft route calls)
-let cachedManifest: any = null;
-async function getManifest() {
-  if (!cachedManifest) {
-    const templateBuffer = readFileSync(TEMPLATE_PATH);
-    cachedManifest = await parseTemplate(templateBuffer);
-  }
-  return cachedManifest;
-}
+import { getManifest } from '../utils/manifest-cache.js';
 
 // Validation schemas
 const CreateDraftSchema = z.object({
@@ -32,6 +13,8 @@ const UpdateDraftSchema = z.object({
   blocks: z.record(z.boolean()).optional(),
   values: z.record(z.string()).optional(),
   tables: z.record(z.array(z.record(z.string()))).optional(),
+  // null value signals deletion of that key from the stored map
+  blockVariants: z.record(z.union([z.string(), z.null()])).optional(),
 });
 
 const UpdateDraftNameSchema = z.object({
@@ -126,6 +109,15 @@ export async function draftRoutes(fastify: FastifyInstance) {
       blocks: updates.blocks !== undefined ? { ...currentData.blocks, ...updates.blocks } : currentData.blocks,
       values: updates.values !== undefined ? { ...currentData.values, ...updates.values } : currentData.values,
       tables: updates.tables !== undefined ? { ...currentData.tables, ...updates.tables } : currentData.tables,
+      blockVariants: (() => {
+        if (updates.blockVariants === undefined) return currentData.blockVariants ?? {};
+        const merged = { ...(currentData.blockVariants ?? {}), ...updates.blockVariants };
+        // Remove keys whose value was explicitly set to null (deletion signal)
+        for (const key of Object.keys(merged)) {
+          if (merged[key] === null) delete merged[key];
+        }
+        return merged;
+      })(),
     };
     
     draftRepository.update(id, JSON.stringify(updatedData));
@@ -213,7 +205,13 @@ export async function draftRoutes(fastify: FastifyInstance) {
       let state: 'Empty' | 'Partial' | 'Complete';
       let completionPercent: number;
 
-      if (totalItems === 0) {
+      // A block with an applied content variant is always Complete
+      const hasVariant = !!(data.blockVariants?.[entry.name]);
+
+      if (hasVariant) {
+        completionPercent = 100;
+        state = 'Complete';
+      } else if (totalItems === 0) {
         // Block has no tracked content — completion is driven by enabled state
         completionPercent = 100;
         state = enabled ? 'Complete' : 'Empty';

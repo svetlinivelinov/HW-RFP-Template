@@ -35,6 +35,9 @@ importers:
       fastify:
         specifier: ^4.25.2
         version: 4.29.1
+      jszip:
+        specifier: 3.10.1
+        version: 3.10.1
       nanoid:
         specifier: ^5.0.4
         version: 5.1.6

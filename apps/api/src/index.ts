@@ -19,6 +19,7 @@ const isProd = process.env.NODE_ENV === 'production';
 async function start() {
   const fastify = Fastify({
     logger: true,
+    bodyLimit: 50 * 1024 * 1024, // 50 MB — needed for DOCX uploads
   });
 
   // Register CORS (only needed in dev when running separate servers)
@@ -31,10 +32,23 @@ async function start() {
   // Initialize database
   initializeDatabase();
 
+  // Register multipart plugin (needed for block content ingestion)
+  // fileSize limit raised to 50 MB — DOCX files from large proposals can be several MB
+  await fastify.register((await import('@fastify/multipart')).default, {
+    limits: {
+      fileSize: 50 * 1024 * 1024, // 50 MB
+      fieldSize: 1 * 1024 * 1024, // 1 MB per text field
+      files: 1,
+    },
+  });
+
   // Register API routes
   await fastify.register(draftRoutes, { prefix: '/api/drafts' });
   await fastify.register(fileRoutes, { prefix: '/api' });
   await fastify.register(templateRoutes, { prefix: '/api/template' });
+    // Register block content ingestion routes
+    const { blockContentRoutes } = await import('./routes/block-content.js');
+    await fastify.register(blockContentRoutes, { prefix: '/api' });
 
   // Health check
   fastify.get('/api/health', async () => {

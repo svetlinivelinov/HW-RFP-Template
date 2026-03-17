@@ -15,6 +15,7 @@ export interface DraftDetails {
     blocks: Record<string, boolean>;
     values: Record<string, string>;
     tables: Record<string, Record<string, string>[]>;
+    blockVariants: Record<string, string>;
   };
   createdAt: string;
   updatedAt: string;
@@ -54,6 +55,13 @@ export interface RenderResponse {
 }
 
 export const api = {
+  async applyBlockVariant(draftId: string, blockName: string, variantId: string): Promise<void> {
+    await axios.patch(`${API_BASE}/drafts/${draftId}`, {
+      blockVariants: { [blockName]: variantId },
+    });
+    await axios.patch(`${API_BASE}/block-content/${variantId}/usage`);
+  },
+
   // Drafts
   async createDraft(name: string): Promise<{ id: string }> {
     const { data } = await axios.post(`${API_BASE}/drafts`, { name });
@@ -76,6 +84,7 @@ export const api = {
       blocks?: Record<string, boolean>;
       values?: Record<string, string>;
       tables?: Record<string, Record<string, string>[]>;
+      blockVariants?: Record<string, string | null>; // null removes a key
     }
   ): Promise<void> {
     await axios.patch(`${API_BASE}/drafts/${id}`, updates);
@@ -127,4 +136,9 @@ export const api = {
   getDownloadUrl(fileId: string): string {
     return `${API_BASE}/files/${fileId}/download`;
   },
+  
+    async getBlockContentVariants(blockName: string) {
+      const { data } = await axios.get(`${API_BASE}/block-content`, { params: { block_name: blockName } });
+      return data;
+    },
 };

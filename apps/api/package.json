@@ -17,6 +17,7 @@
     "@packages/template-engine": "workspace:*",
     "better-sqlite3": "^9.2.2",
     "fastify": "^4.25.2",
+    "jszip": "3.10.1",
     "nanoid": "^5.0.4",
     "zod": "^3.22.4"
   },

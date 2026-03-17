@@ -1,4 +1,5 @@
 import Database, { Database as DatabaseType } from 'better-sqlite3';
+import { nanoid } from 'nanoid';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { mkdirSync } from 'fs';
@@ -57,6 +58,29 @@ export function initializeDatabase() {
     )
   `);
 
+    // Block content table for reusable block variants
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS block_content (
+        id TEXT PRIMARY KEY,
+        block_name TEXT NOT NULL,
+        variant_name TEXT NOT NULL,
+        source_project TEXT,
+        content_xml TEXT NOT NULL,
+        preview_html TEXT,
+        created_at TEXT NOT NULL,
+        created_by TEXT,
+        version INTEGER DEFAULT 1,
+        updated_at TEXT,
+        updated_by TEXT,
+        parent_id TEXT,
+        tags TEXT,
+        description TEXT,
+        usage_count INTEGER DEFAULT 0,
+        quality_rating INTEGER,
+        content_hash TEXT,
+        FOREIGN KEY (parent_id) REFERENCES block_content(id)
+      )
+    `);
   console.log('Database initialized');
 }
 
@@ -134,6 +158,75 @@ export interface BlockMeta {
   sort_order: number;
   is_optional: number;
 }
+
+// Block content repository
+export interface BlockContent {
+  id: string;
+  block_name: string;
+  variant_name: string;
+  source_project: string;
+  content_xml: string;
+  preview_html: string;
+  created_at: string;
+  created_by: string;
+  version: number;
+  updated_at: string | null;
+  updated_by: string | null;
+  parent_id: string | null;
+  tags: string | null;
+  description: string | null;
+  usage_count: number;
+  quality_rating: number | null;
+  content_hash: string;
+}
+
+export const blockContentRepository = {
+  insert(content: Omit<BlockContent, 'id' | 'created_at'>): string {
+    const id = nanoid();
+    const now = new Date().toISOString();
+    const stmt = db.prepare(`
+      INSERT INTO block_content (
+        id, block_name, variant_name, source_project, content_xml, preview_html, created_at, created_by, version, updated_at, updated_by, parent_id, tags, description, usage_count, quality_rating, content_hash
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    stmt.run(
+      id,
+      content.block_name,
+      content.variant_name,
+      content.source_project,
+      content.content_xml,
+      content.preview_html,
+      now,
+      content.created_by,
+      content.version,
+      content.updated_at,
+      content.updated_by,
+      content.parent_id,
+      content.tags,
+      content.description,
+      content.usage_count,
+      content.quality_rating,
+      content.content_hash
+    );
+    return id;
+  },
+  findByHash(block_name: string, content_hash: string): BlockContent | undefined {
+    const stmt = db.prepare('SELECT * FROM block_content WHERE block_name = ? AND content_hash = ?');
+    return stmt.get(block_name, content_hash) as BlockContent | undefined;
+  },
+  findById(id: string): BlockContent | undefined {
+    const stmt = db.prepare('SELECT * FROM block_content WHERE id = ?');
+    return stmt.get(id) as BlockContent | undefined;
+  },
+  findByBlockName(block_name: string): BlockContent[] {
+    const stmt = db.prepare('SELECT * FROM block_content WHERE block_name = ? ORDER BY created_at DESC');
+    return stmt.all(block_name) as BlockContent[];
+  },
+  incrementUsage(id: string): void {
+    const stmt = db.prepare('UPDATE block_content SET usage_count = usage_count + 1 WHERE id = ?');
+    stmt.run(id);
+  }
+};
 
 export const blockMetaRepository = {
   findAll(): BlockMeta[] {
